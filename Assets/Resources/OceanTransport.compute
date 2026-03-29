@@ -1,0 +1,157 @@
+// OceanTransport.compute
+// ──────────────────────
+// GPU advection simulation that transports chlorophyll-seeded intensity
+// along ocean current vectors to produce filament structures.
+//
+// Three kernels, dispatched each frame by OceanBackground.cs:
+//   InitSeed   — seeds state from chlorophyll texture (run once)
+//   AdvectStep — one advection + decay step (ping-pong buffers)
+//   Render     — maps intensity to a colour texture for display
+
+#pragma kernel InitSeed
+#pragma kernel AdvectStep
+#pragma kernel Render
+
+// ── Inputs (read-only) ────────────────────────────────────────────────────────
+
+Texture2D<float4> _ChlorophyllTex;   // grayscale seed, packed in .r
+Texture2D<float4> _CurrentsTex;      // RG = u/v (0.5 = zero flow)
+
+SamplerState sampler_linear_clamp;
+
+// ── Simulation state (RW ping-pong) ──────────────────────────────────────────
+
+RWTexture2D<float> _State;      // write target this step
+RWTexture2D<float> _StatePrev;  // read source this step
+
+// ── Final colour output ───────────────────────────────────────────────────────
+
+RWTexture2D<float4> _Output;
+
+// ── Parameters (set from C#) ──────────────────────────────────────────────────
+
+int   _Width, _Height;
+float _Decay;            // energy loss per step     (e.g. 0.97)
+float _Diffusion;        // lateral spread fraction  (e.g. 0.015)
+float _SeedStrength;     // how hard chlorophyll re-seeds (e.g. 1.1)
+float _AdvectStrength;   // pixels advected per step (e.g. 2.5)
+float _Threshold;        // weak-signal kill floor   (e.g. 0.06)
+float _Contrast;         // output brightness scale  (e.g. 3.0)
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Manual bilinear sample from RW texture (RW doesn't support hardware sampling)
+float SampleBilinear(RWTexture2D<float> tex, float2 pos)
+{
+    int2 p0 = int2(floor(pos));
+    float2 f = frac(pos);
+
+    int2 p1 = p0 + int2(1, 0);
+    int2 p2 = p0 + int2(0, 1);
+    int2 p3 = p0 + int2(1, 1);
+
+    // Clamp to grid
+    p0 = clamp(p0, int2(0, 0), int2(_Width - 1, _Height - 1));
+    p1 = clamp(p1, int2(0, 0), int2(_Width - 1, _Height - 1));
+    p2 = clamp(p2, int2(0, 0), int2(_Width - 1, _Height - 1));
+    p3 = clamp(p3, int2(0, 0), int2(_Width - 1, _Height - 1));
+
+    float v0 = tex[p0], v1 = tex[p1];
+    float v2 = tex[p2], v3 = tex[p3];
+
+    return lerp(lerp(v0, v1, f.x), lerp(v2, v3, f.x), f.y);
+}
+
+// ── InitSeed ──────────────────────────────────────────────────────────────────
+
+[numthreads(8, 8, 1)]
+void InitSeed(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float2 uv  = float2(id.x + 0.5, id.y + 0.5) / float2(_Width, _Height);
+    float  chl = _ChlorophyllTex.SampleLevel(sampler_linear_clamp, uv, 0).r;
+
+    // Power-law push: concentrate signal, reduce noise floor
+    float seed = saturate(pow(max(chl, 0.0), 0.55) * _SeedStrength);
+
+    _State[id.xy]     = seed;
+    _StatePrev[id.xy] = seed;
+}
+
+// ── AdvectStep ────────────────────────────────────────────────────────────────
+
+[numthreads(8, 8, 1)]
+void AdvectStep(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float2 uv = float2(id.x + 0.5, id.y + 0.5) / float2(_Width, _Height);
+
+    // Decode current vectors from RG texture (0.5 = zero flow)
+    float4 cur = _CurrentsTex.SampleLevel(sampler_linear_clamp, uv, 0);
+    float  u   = (cur.r - 0.5) * 2.0;   // −1 .. +1
+    float  v   = (cur.g - 0.5) * 2.0;
+
+    float  mag = length(float2(u, v));
+
+    // Back-trace: where did this cell's mass come from last step?
+    float2 srcPos = float2((float)id.x - u * _AdvectStrength,
+                           (float)id.y - v * _AdvectStrength);
+    float  advected = SampleBilinear(_StatePrev, srcPos);
+
+    // Minimal lateral diffusion — preserve filament sharpness
+    float nb  = 0.0;
+    int   cnt = 0;
+    if ((int)id.x > 0)              { nb += _StatePrev[int2(id.x - 1, id.y)]; cnt++; }
+    if ((int)id.x < _Width  - 1)   { nb += _StatePrev[int2(id.x + 1, id.y)]; cnt++; }
+    if ((int)id.y > 0)              { nb += _StatePrev[int2(id.x, id.y - 1)]; cnt++; }
+    if ((int)id.y < _Height - 1)   { nb += _StatePrev[int2(id.x, id.y + 1)]; cnt++; }
+    float diff = (cnt > 0) ? nb / (float)cnt : advected;
+
+    // Re-seeding: chlorophyll continuously injects signal
+    float chl    = _ChlorophyllTex.SampleLevel(sampler_linear_clamp, uv, 0).r;
+    float reseed = pow(max(chl, 0.0), 0.55) * _SeedStrength * 0.25;
+
+    // Combine: advect + diffuse + decay + reseed
+    float val = (advected * (1.0 - _Diffusion) + diff * _Diffusion) * _Decay + reseed;
+
+    // Directional amplification: strong flow preserves signal (creates long streaks)
+    val *= (1.0 + mag * 0.35);
+
+    // Nonlinear compression: anything below threshold dies out quickly
+    // This keeps most of the ocean dark and filaments sparse
+    val = (val > _Threshold) ? val : val * 0.08;
+
+    _State[id.xy] = saturate(val);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+
+[numthreads(8, 8, 1)]
+void Render(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Width || (int)id.y >= _Height) return;
+
+    float raw = _State[id.xy];
+
+    // High-contrast nonlinear tone mapping
+    float display = pow(saturate(raw * _Contrast), 0.65);
+
+    // Colour ramp:
+    //   0.00 → deep ocean dark navy
+    //   0.30 → faint teal (emerging filament)
+    //   0.65 → bright cyan
+    //   1.00 → near-white (crest)
+    float3 c0 = float3(0.010, 0.040, 0.090);   // deep dark
+    float3 c1 = float3(0.030, 0.180, 0.340);   // mid teal
+    float3 c2 = float3(0.120, 0.600, 0.750);   // cyan filament
+    float3 c3 = float3(0.750, 0.960, 1.000);   // bright crest
+
+    float3 col;
+    if      (display < 0.3) col = lerp(c0, c1, display / 0.30);
+    else if (display < 0.65) col = lerp(c1, c2, (display - 0.30) / 0.35);
+    else                     col = lerp(c2, c3, (display - 0.65) / 0.35);
+
+    _Output[id.xy] = float4(col, 1.0);
+}

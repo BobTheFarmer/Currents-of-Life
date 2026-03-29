@@ -1,0 +1,43 @@
+Unity Editor version:    6000.3.9f1 (7a9955a4f2fa)
+Branch:                  6000.3/staging
+Build type:              Release
+Batch mode:              YES
+macOS version:           Version 15.7.3 (Build 24G419)
+Darwin version:          24.6.0
+Architecture:            arm64
+Running under Rosetta:   NO
+Available memory:        36864 MB
+Date:                    2026-03-29T02:36:17Z
+[Licensing::Module] Trying to connect to existing licensing client channel...
+[Licensing::IpcConnector] Successfully connected to: "LicenseClient-colin" at "2026-03-29T02:36:17.118677Z"
+Launching external process: /Applications/Unity/Hub/Editor/6000.3.9f1/Unity.app/Contents/Resources/PackageManager/Server/UnityPackageManager
+
+COMMAND LINE ARGUMENTS:
+/Applications/Unity/Hub/Editor/6000.3.9f1/Unity.app/Contents/MacOS/Unity
+-batchmode
+-projectPath
+/Users/colin/claude-workspace/Build4Good 2026
+-logFile
+/Users/colin/claude-workspace/Build4Good 2026/compile_log.txt
+-quit
+Successfully changed project path to: /Users/colin/claude-workspace/Build4Good 2026
+/Users/colin/claude-workspace/Build4Good 2026
+[Licensing::Client] Handshaking with LicensingClient:
+  Version:                 1.17.4+4293ba1
+  Session Id:              8f36e98ef9f744308a8c18956288d1dd
+  Correlation Id:          ffd71c5abf01479962e6694311f68258
+  External correlation Id: 5467996408269944754
+  Machine Id:              3nm+pqG5BCCZ1RHe1j4Sm15l/NA=
+[Licensing::Module] Successfully connected to LicensingClient on channel: "LicenseClient-colin" (connect: 0.00s, validation: 0.00s, handshake: 0.15s)
+[Licensing::IpcConnector] Successfully connected to: "LicenseClient-colin-notifications" at "2026-03-29T02:36:17.276307Z"
+[Licensing::Module] Error: Access token is unavailable; failed to update
+[Licensing::Client] Successfully resolved entitlement details
+[Licensing::Module] License group:
+  Id: 20066354346370-UnityPersXXXX
+  Product: Unity Personal
+  Type: Assigned
+  Expiration: Unlimited
+[Licensing::Client] Successfully updated license, isAsync: True, time: 0.00
+[Package Manager] Server process was shutdown
+[Licensing::Client] Successfully resolved entitlement details
+[Licensing::Module] Licensing Background thread has ended after 0.16s

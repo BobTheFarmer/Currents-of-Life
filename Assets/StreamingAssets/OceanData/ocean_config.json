@@ -1,0 +1,11 @@
+{
+  "lat_min": 10.0,
+  "lat_max": 60.0,
+  "lon_min": 130.0,
+  "lon_max": 215.0,
+  "grid_w": 512,
+  "grid_h": 256,
+  "region": "North Pacific \u2014 Kuroshio + subtropical gyre",
+  "chl_source": "NASA NEO MODIS Aqua",
+  "cur_source": "analytical (OSCAR-matched)"
+}
